@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 // A skinned woman (Ready Player Me style, Mixamo-rigged) doing Reformer footwork with straps.
 //
 // Choreography: she lies supine, both feet on the footbar pads, both hands gripping the strap handles.
+// The feet are planted once (see stance()) and never animated: only the hips, knees and the arms move.
 // As the legs push the carriage toward the head end, her arms sweep from reaching toward the head end
 // to reaching toward the feet, which keeps the hands roughly where the (fixed-length, taut) ropes
 // hold them. Everything is a pure function of the one extension value `c` (0..1) that moves the
@@ -16,8 +17,11 @@ const CARRIAGE_HOME = 0.3, CARRIAGE_TRAVEL = 0.55;
 const CUSHION_TOP = 0.285 + 0.0905;              // carriage group y + cushion surface
 const BAR_X = 0.88, BAR_Y = 0.52, BAR_R = 0.021; // the footbar's padded tubes (reformer.js)
 const PAD_Z = 0.17;                              // rubber pads at z = +-0.17: hip-width stance
+const SOLE_DEG = 60;                             // heel -> toe of each sole, measured up from +X (90 = vertical against the bar): a relaxed, slightly pointed foot
+const SOLE_CONTACT = -0.17;                      // where along the sole the bar touches, from the ball of the foot toward the heel (m): the heel rests on the pad
+const SOLE_GAP = 0.002;                          // air between sole and pad (m): rests on it, never sinks into it
 const HEIGHT = 1.76;
-const MAX_REACH = 0.985;                         // leg never fully locked
+const MAX_REACH = 0.95;                          // at full extension the knees keep a soft bend (~145 deg), never locked
 const ARM_REACH = 0.93;                          // arms nearly straight, soft elbows
 const PULLEYS = [new THREE.Vector3(-1.07, 0.99, -0.3024), new THREE.Vector3(-1.07, 0.99, 0.3024)]; // [left(-z), right(+z)], reformer.js
 const RING_OFFSET = 0.075;                       // grip centre -> rope ring (must match reformer.js)
@@ -106,7 +110,26 @@ function buildPerson(gltf, small) {
   const L1 = rp('LeftUpLeg').distanceTo(rp('LeftLeg')), L2 = rp('LeftLeg').distanceTo(rp('LeftFoot'));
   const LEG = L1 + L2;
   const hipOffset = rp('LeftUpLeg').clone().sub(rp('Hips')).applyQuaternion(lie);
-  const footLen = rp('LeftFoot').distanceTo(rp('LeftToeBase'));
+
+  // ---- the shoes, measured at rest (flat on the floor) ----
+  // The feet are planted by their SOLES, not by the bones: the ankle->ball bone line runs ~20 degrees off the
+  // sole plane, and the sole sits a few centimetres under the toe-base bone. Both are read off the shoe mesh.
+  const shoeVerts = [];
+  for (const m of meshes) {
+    if (!m.isSkinnedMesh || !/footwear/i.test(m.name)) continue;
+    const pos = m.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) shoeVerts.push(m.getVertexPosition(i, v3(0, 0, 0)).applyMatrix4(m.matrixWorld));
+  }
+  const sole = {};
+  for (const side of ['Left', 'Right']) {
+    const a = rp(`${side}Foot`), t = rp(`${side}ToeBase`);
+    const heading = t.clone().sub(a).setY(0).normalize();               // heel -> toe along the floor
+    const ballAt = t.clone().sub(a).dot(heading);
+    const mine = shoeVerts.filter((p) => p.x * Math.sign(a.x) > 0);       // this foot's shoe only (her left is +X at rest)
+    // how far the sole sits below the toe-base bone, `f` metres along the foot from the ball (negative = toward the heel)
+    const dropAt = (f) => { let y = Infinity; for (const p of mine) if (Math.abs(p.clone().sub(a).dot(heading) - ballAt - f) < 0.02) y = Math.min(y, p.y); return Number.isFinite(y) ? t.y - y : 0.03; };
+    sole[side] = { heading, dropAt, toeLocal: t.clone().sub(a).applyQuaternion(rest.get(B(`${side}Foot`)).q.clone().invert()) };
+  }
   const A1 = rp('LeftArm').distanceTo(rp('LeftForeArm')), A2 = rp('LeftForeArm').distanceTo(rp('LeftHand'));
   const ARM = A1 + A2;
   const palmFwd = rp('LeftHand').distanceTo(rp('LeftHandMiddle1'));     // wrist -> knuckle
@@ -122,20 +145,44 @@ function buildPerson(gltf, small) {
     palmN[side] = n;
   }
 
-  // ---- where she lies: hips such that c = 1 leaves the legs almost straight ----
-  const FD0 = v3(0.55, -0.835, 0).normalize();
-  const dorsalOf = (fd) => v3(-fd.y, fd.x, 0);
-  const ballFor = (fd, z) => v3(BAR_X, BAR_Y, z).addScaledVector(dorsalOf(fd), BAR_R + 0.03);
-  const ANKLE0 = ballFor(FD0, PAD_Z).addScaledVector(FD0, -footLen);
+  // ---- the planted feet, and where she lies ----
+  //
+  // The feet are fixed in frame F for the whole exercise: same orientation, same contact, never animated.
+  // Each foot lies in the X/Y plane (no toe-in/out, no roll) with its sole flat against the footbar pad.
+  // Only the hips, knees and (as a consequence of the shin moving over a fixed foot) the ankle flex change.
+  const SOLE_DIR = v3(1, 0, 0), SOLE_OUT = v3(0, -1, 0);   // heel -> toe, and out of the sole toward the bar (set by stance())
+  const footQ = {}, ballOff = {}, ankle = {};              // foot-bone orientation in F; ankle -> toe-base offset in F; planted ankle
+  let HIP_X = 0;
   const hipJointAt = (c, h, hy) => v3(CARRIAGE_HOME - CARRIAGE_TRAVEL * c + h, hy, 0).add(hipOffset);
   const HIP_Y_GUESS = CUSHION_TOP + 0.1;
-  let lo = 0, hi = 0.46;
-  for (let i = 0; i < 40; i++) {
-    const mid = (lo + hi) / 2;
-    const d = hipJointAt(1, mid, HIP_Y_GUESS).setZ(PAD_Z).distanceTo(ANKLE0);
-    if (d > LEG * MAX_REACH) lo = mid; else hi = mid;
+  function stance(deg, f, reach = MAX_REACH) {
+    SOLE_DIR.set(Math.cos(rad(deg)), Math.sin(rad(deg)), 0);
+    SOLE_OUT.set(Math.sin(rad(deg)), -Math.cos(rad(deg)), 0);
+    const wantQ = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(SOLE_DIR, SOLE_OUT, v3(0, 0, 0).crossVectors(SOLE_DIR, SOLE_OUT)));
+    for (const side of ['Left', 'Right']) {
+      const { heading, dropAt, toeLocal } = sole[side];
+      const floorUp = v3(0, -1, 0);                        // rest: the sole faces the floor
+      const restQ = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(heading, floorUp, v3(0, 0, 0).crossVectors(heading, floorUp)));
+      // the foot bone's rest orientation, turned by the rotation that takes the rest sole frame to the planted one
+      footQ[side] = wantQ.clone().multiply(restQ.invert()).multiply(rest.get(B(`${side}Foot`)).q);
+      ballOff[side] = toeLocal.clone().applyQuaternion(footQ[side]);
+      sole[side].gap = BAR_R + dropAt(f) + SOLE_GAP;       // toe-base bone -> bar axis, along the sole normal
+    }
+    // ankle -> a point on the sole `f` along the foot from the ball must touch the pad
+    for (const side of ['Left', 'Right']) {
+      ankle[side] = (z) => v3(BAR_X, BAR_Y, z).addScaledVector(SOLE_OUT, -sole[side].gap).addScaledVector(SOLE_DIR, -f).sub(ballOff[side]);
+    }
+    // hips such that c = 1 leaves the legs almost straight
+    const target = ankle.Left(PAD_Z);
+    let lo = 0, hi = 0.46;
+    for (let i = 0; i < 40; i++) {
+      const mid = (lo + hi) / 2;
+      const d = hipJointAt(1, mid, HIP_Y_GUESS).setZ(PAD_Z).distanceTo(target);
+      if (d > LEG * reach) lo = mid; else hi = mid;
+    }
+    HIP_X = (lo + hi) / 2;
   }
-  const HIP_X = (lo + hi) / 2;
+  stance(SOLE_DEG, SOLE_CONTACT);
 
   // ---- frame F plumbing: the holder group is rotated by the cursor; compute everything holder-relative ----
   const Mp = new THREE.Matrix4(), Mpi = new THREE.Matrix4(), Qp = new THREE.Quaternion();
@@ -217,7 +264,7 @@ function buildPerson(gltf, small) {
   const hips = B('Hips');
   const hp = v3(0, 0, 0), tmp = v3(0, 0, 0);
   const H = v3(0, 0, 0), T = v3(0, 0, 0), K = v3(0, 0, 0), A = v3(0, 0, 0), pole = v3(0, 0, 0);
-  const fd = v3(0, 0, 0), dorsal = v3(0, 0, 0), ball = v3(0, 0, 0), shank = v3(0, 0, 0);
+  const ball = v3(0, 0, 0), shank = v3(0, 0, 0);
   const grips = [v3(0, 0, 0), v3(0, 0, 0)];                 // [left, right] handle centres in frame F, for reformer.js
   grips.axes = [v3(1, 0, 0), v3(1, 0, 0)];                  // grip-bar axis of each handle (across the fist)
   const info = { c: 0, kneeDeg: [0, 0], ankleDeg: [0, 0], footErr: [0, 0], gripErr: [0, 0], elbowDeg: [0, 0], ropeClear: 0, kneeToTorso: 0 };
@@ -226,29 +273,18 @@ function buildPerson(gltf, small) {
   function leg(side, s, idx) {                              // s = +1 left (her left lies at -Z), -1 right
     const upLeg = B(`${side}UpLeg`), knee = B(`${side}Leg`), foot = B(`${side}Foot`), toe = B(`${side}ToeBase`);
     fpos(upLeg, H);
-    const z = -s * PAD_Z;
     pole.set(-0.04, 1, -s * 0.07).normalize();               // knees up, tracking the line of the feet
-    const plantar = rad(40 + 12 * curC);                     // ankle never near fully pointed (max ~50 deg real plantarflexion)
-    fd.copy(FD0);
-    for (let it = 0; it < 6; it++) {
-      ball.copy(ballFor(fd, z));
-      T.copy(ball).addScaledVector(fd, -footLen);
-      ik(H, T, L1, L2, pole, K, A, 0.995);
-      shank.copy(A).sub(K).normalize();
-      const th = Math.atan2(shank.y, shank.x) - plantar;
-      fd.set(Math.cos(th), Math.sin(th), 0);
-    }
-    ball.copy(ballFor(fd, z));
-    T.copy(ball).addScaledVector(fd, -footLen);
+    // The ankle is where the planted foot puts it (constant); the hip does all the travelling, so only the knee
+    // and thigh respond to the carriage. The foot bone itself is never driven by anything but its fixed pose.
+    T.copy(ankle[side](-s * PAD_Z));
     const r = ik(H, T, L1, L2, pole, K, A, 0.995);
     aim(upLeg, knee, tmp.copy(K).sub(H).normalize());
-    aim(knee, foot, tmp.copy(A).sub(K).normalize());
-    const soleWant = dorsalOf(fd).negate();
-    aim(foot, toe, fd, rollTo(foot, toe, fd, v3(0, -1, 0), soleWant));
+    aim(knee, foot, shank.copy(A).sub(K).normalize());
+    setFQ(foot, footQ[side]);
     // bookkeeping for the self-test
     info.kneeDeg[idx] = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp((L1 * L1 + L2 * L2 - r.d * r.d) / (2 * L1 * L2), -1, 1)));
-    info.ankleDeg[idx] = 180 - THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(shank.dot(fd), -1, 1)));
-    fpos(toe, tmp); info.footErr[idx] = tmp.distanceTo(ball);
+    info.ankleDeg[idx] = 90 - THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(shank.dot(SOLE_DIR), -1, 1)));   // + plantar-, - dorsiflexion
+    fpos(toe, tmp); info.footErr[idx] = tmp.distanceTo(ball.copy(T).add(ballOff[side]));
     info.reach = r.raw / LEG;
   }
 
@@ -351,5 +387,5 @@ function buildPerson(gltf, small) {
     });
   };
 
-  return { root, update, dispose, info, grips, bones, meshes, params: { HIP_X, LEG, ARM, S, palmN } };
+  return { root, update, dispose, info, grips, bones, meshes, stance, params: { get HIP_X() { return HIP_X; }, LEG, ARM, S, palmN } };
 }

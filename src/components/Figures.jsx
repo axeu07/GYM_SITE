@@ -33,31 +33,6 @@ export function Fig({ children, playing = true }) {
   );
 }
 
-const Dumbbell = ({ x, y, dx, dy, dur }) => (
-  <g className="eq" transform={`translate(${x} ${y})`}>
-    <g>
-      <A type="translate" v={['0 0', `${dx} ${dy}`, '0 0']} dur={dur} />
-      <line x1="-16" y1="0" x2="16" y2="0" strokeWidth="6" />
-      <rect x="-24" y="-12" width="9" height="24" rx="3" className="fill" />
-      <rect x="15" y="-12" width="9" height="24" rx="3" className="fill" />
-    </g>
-  </g>
-);
-
-export function Lifter() {
-  const d = 2.6;
-  return (
-    <Fig>
-      <circle className="hd" cx="200" cy="98" r="24" />
-      <path className="bd" d="M200 128 L200 238 M150 142 L250 142 M200 238 L176 356 M200 238 L224 356" />
-      <path className="bd" d="M150 142 L116 192 L128 142"><A v={['M150 142 L116 192 L128 142', 'M150 142 L132 94 L138 40', 'M150 142 L116 192 L128 142']} dur={d} /></path>
-      <path className="bd" d="M250 142 L284 192 L272 142"><A v={['M250 142 L284 192 L272 142', 'M250 142 L268 94 L262 40', 'M250 142 L284 192 L272 142']} dur={d} /></path>
-      <Dumbbell x={128} y={142} dx={10} dy={-102} dur={d} />
-      <Dumbbell x={272} y={142} dx={-10} dy={-102} dur={d} />
-    </Fig>
-  );
-}
-
 export function Pilates() {
   const d = 3.2;
   const legs = ['M170 262 L248 249 L326 236', 'M240 262 L264 187 L326 236', 'M170 262 L248 249 L326 236'];
@@ -163,7 +138,7 @@ export function Stretch() {
   );
 }
 
-export const FIGURES = { pilates: Pilates, boxer: Boxer, hoop: Hoop, squat: Squat, lifter: Lifter, jump: Jump, stretch: Stretch };
+export const FIGURES = { pilates: Pilates, boxer: Boxer, hoop: Hoop, squat: Squat, jump: Jump, stretch: Stretch };
 
 export function Ecg() {
   return (

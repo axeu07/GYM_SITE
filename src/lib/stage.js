@@ -58,3 +58,34 @@ export const introSeen = () => {
 export const markIntroSeen = () => {
   try { sessionStorage.setItem(KEY, '1'); } catch { /* private mode */ }
 };
+
+/* ------------------------------------------------------------------ */
+/*  Hand-off signals between the opening, the 3D studio and the page.  */
+/*  Plain module state + subscriptions: no React re-render of <App>.   */
+/* ------------------------------------------------------------------ */
+
+/** The landing copy may start revealing (fired by the opening as its iris opens, or at once without an opening). */
+const revealSubs = new Set();
+export const reveal = { done: false };
+export const subscribeReveal = (f) => { revealSubs.add(f); return () => revealSubs.delete(f); };
+export const getRevealed = () => reveal.done;
+export function fireReveal() { if (reveal.done) return; reveal.done = true; revealSubs.forEach((f) => f()); }
+
+/**
+ * The 3D studio boots in the background (see three/stage3d.js). `studioReady` resolves true once its shaders
+ * are compiled and its geometry, textures and shadow maps are on the GPU, so showing it can never stall;
+ * false if it could not be built (the page then shows the lightweight illustrated alternative).
+ */
+export const studio = { kicked: false, ready: false, failed: false };
+let settle;
+export const studioReady = new Promise((r) => { settle = r; });
+const kickSubs = [];
+const failSubs = new Set();
+export function whenKicked(cb) { if (studio.kicked) { cb(); return () => {}; } kickSubs.push(cb); return () => { const i = kickSubs.indexOf(cb); if (i >= 0) kickSubs.splice(i, 1); }; }
+export function kickStudio() { if (studio.kicked) return; studio.kicked = true; kickSubs.splice(0).forEach((f) => f()); }
+export function settleStudio(ok) {
+  if (ok) studio.ready = true; else { studio.failed = true; failSubs.forEach((f) => f()); }
+  settle(ok);
+}
+export const subscribeStudioFail = (f) => { failSubs.add(f); return () => failSubs.delete(f); };
+export const getStudioFailed = () => studio.failed;

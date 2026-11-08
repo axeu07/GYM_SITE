@@ -16,7 +16,7 @@
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
 *, *::before, *::after { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; scrollbar-gutter: stable; }   /* unlocking scroll after the opening must not change the viewport width */
 html.is-locked { overflow: hidden; }
 body { margin: 0; background: var(--ink); color: var(--ivory); font-family: var(--sans); font-weight: 300; font-size: 1.0625rem; line-height: 1.65; overflow-x: hidden; -webkit-font-smoothing: antialiased; }
 body::after { /* film grain */

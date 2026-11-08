@@ -1,5 +1,6 @@
-import { useLayoutEffect, useEffect, useRef } from 'react';
+import { useLayoutEffect, useEffect, useRef, useSyncExternalStore } from 'react';
 import { gsap, prefersReduced } from '../lib/scroll';
+import { subscribeReveal, getRevealed } from '../lib/stage';
 import { Btn } from './ui';
 
 const LINES = [
@@ -11,8 +12,10 @@ const LINES = [
  * Editorial hero set over the 3D studio (the Reformer itself is rendered by Stage3D / the fallback).
  * Everything here reveals the moment the entrance opens, and lifts away as the story begins.
  */
-export default function Hero({ ready, gl }) {
+export default function Hero({ gl }) {
   const root = useRef(null);
+  // Re-renders only this section when the opening says the copy may start (not the whole page).
+  const ready = useSyncExternalStore(subscribeReveal, getRevealed);
 
   // Hidden start state before first paint (skipped for reduced motion).
   useLayoutEffect(() => {
@@ -32,8 +35,12 @@ export default function Hero({ ready, gl }) {
       tl.to('.hero .eyebrow', { opacity: 1, y: 0, duration: 1.1 }, 0.2)
         .to('.hl__pre', { opacity: 1, y: 0, duration: 1.2 }, 0.3);
       gsap.utils.toArray('.hl__line').forEach((line, i) => {
-        tl.to(line.querySelectorAll('.hl__c'), { yPercent: 0, rotate: 0, opacity: 1, duration: 1.5, stagger: { each: 0.045, from: i ? 'start' : 'edges' } }, 0.45 + i * 0.22)
-          .fromTo(line, { letterSpacing: '0.12em' }, { letterSpacing: '-0.01em', duration: 2.1, ease: 'power3.out' }, 0.45 + i * 0.22);
+        const chars = line.querySelectorAll('.hl__c');
+        const fs = parseFloat(getComputedStyle(line).fontSize) || 100;
+        tl.to(chars, { yPercent: 0, rotate: 0, opacity: 1, duration: 1.5, stagger: { each: 0.045, from: i ? 'start' : 'edges' } }, 0.45 + i * 0.22)
+          // the tracking "settles" from 0.12em to -0.01em: done with per-letter transforms (compositor only),
+          // not by animating letter-spacing, which re-lays-out the whole headline every frame
+          .fromTo(chars, { x: (k) => k * 0.13 * fs }, { x: 0, duration: 2.1, ease: 'power3.out' }, 0.45 + i * 0.22);
       });
       tl.to('.hero__sub', { opacity: 1, y: 0, duration: 1.2 }, 1.1)
         .to('.hero__cta', { opacity: 1, y: 0, duration: 1.2 }, 1.3)

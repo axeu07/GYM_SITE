@@ -20,13 +20,13 @@ export const PHOTOS = {
 };
 
 // Scene IV · Beyond Pilates. Real photographs where we have them; the aerial silk chapter uses the
-// stylised performer and the last chapter an animated figure until real photography/footage is supplied.
+// stylised performer and the last chapter a real-time 3D athlete (three/lifter.js) until real photography/footage is supplied.
 export const CHAPTERS = [
   { title: 'Aerial Hoop / Lyra', sub: 'Strength, flexibility and grace, suspended.', art: 'photo', photo: 'aerial', pos: '50% 36%' },
   { title: 'Aerial Silk', sub: 'Fluid, climbing and wrapping: control that looks effortless.', art: 'silk' },
   { title: 'Boxing', sub: 'A dedicated boxing zone: heavy bags, conditioning and technique.', art: 'photo', photo: 'boxing', pos: '30% 50%' },
   { title: 'Functional Training', sub: 'Suspension and bodyweight work that builds strength you can use.', art: 'contain', photo: 'suspension' },
-  { title: 'Strength & Conditioning', sub: 'Structured strength training for every level, from first session to experienced.', art: 'fig', fig: 'lifter' },
+  { title: 'Strength & Conditioning', sub: 'Structured strength training for every level, from first session to experienced.', art: 'lifter' },
 ];
 
 export const PROGRAMS = [

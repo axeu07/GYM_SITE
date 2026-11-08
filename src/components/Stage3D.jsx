@@ -9,12 +9,16 @@ import { loadPerson } from '../three/person';
 // Camera path through the story, in scroll units (u = viewport heights scrolled).
 // pos/tg are in metres; sx/sy shift the machine within the frame (so it sits beside the text);
 // dim fades the whole studio to black as the story hands over to the next chapter.
+//
+// Framing rule for scenes 1 and 2: the rider and the machine stay in frame together, seen from the side or a
+// three-quarter angle at 2.7 m or more. The camera never goes in close on the foot end, where the raised knees
+// and hips fill the frame, and the target stays at mid-body height instead of on the pelvis.
 const KEYS = [
   { u: 0.0, pos: [2.4, 1.3, 3.8], tg: [0.1, 0.3, 0], fov: 30, sx: 0.17, sy: 0.0, dim: 0 },
   { u: 1.0, pos: [1.6, 1.1, 3.0], tg: [0.15, 0.3, 0], fov: 30, sx: 0.14, sy: 0.0, dim: 0 },
-  // Scene 1 · Precision: closer, low, on the footbar and the head of the carriage
-  { u: 1.8, pos: [1.7, 0.72, 1.45], tg: [0.55, 0.38, 0], fov: 27, sx: 0.2, sy: 0.0, dim: 0 },
-  { u: 2.5, pos: [0.7, 0.95, 1.7], tg: [0.1, 0.32, 0], fov: 28, sx: 0.2, sy: 0.0, dim: 0 },
+  // Scene 1 · Precision: a slow three-quarter push-in that keeps the whole rider, footbar and carriage in view
+  { u: 1.8, pos: [1.4, 1.05, 2.7], tg: [0.3, 0.5, 0], fov: 28, sx: 0.2, sy: 0.0, dim: 0 },
+  { u: 2.5, pos: [0.9, 1.05, 2.9], tg: [0.15, 0.45, 0], fov: 29, sx: 0.2, sy: 0.0, dim: 0 },
   // Scene 2 · Movement: an orbit from the foot end round to the head end
   { u: 3.2, pos: [0.4, 1.0, 3.1], tg: [0, 0.32, 0], fov: 30, sx: 0.17, sy: 0.0, dim: 0 },
   { u: 3.9, pos: [-1.9, 1.15, 2.7], tg: [-0.1, 0.38, 0], fov: 30, sx: 0.17, sy: 0.0, dim: 0 },
@@ -25,17 +29,34 @@ const KEYS = [
   { u: 6.0, pos: [2.2, 3.0, 5.0], tg: [-0.3, 0.1, 0], fov: 34, sx: -0.25, sy: 0.18, dim: 1 },
 ];
 
+// The path is a monotone cubic Hermite spline (PCHIP) through the keys: the camera keeps moving through each
+// key instead of easing to a stop at it, so the hand-over between chapters is one continuous glide, and a
+// channel never overshoots its keys (no swing past the footbar between two framings). Both ends rest.
+const CH = KEYS.map((k) => [...k.pos, ...k.tg, k.fov, k.sx, k.sy, k.dim]);
+const TAN = CH[0].map((_, c) => {
+  const n = KEYS.length, d = [], m = new Array(n).fill(0);
+  for (let i = 0; i < n - 1; i++) d.push((CH[i + 1][c] - CH[i][c]) / (KEYS[i + 1].u - KEYS[i].u));
+  for (let i = 1; i < n - 1; i++) {
+    if (d[i - 1] * d[i] <= 0) continue;                         // a turning point: flat tangent, no overshoot
+    const h0 = KEYS[i].u - KEYS[i - 1].u, h1 = KEYS[i + 1].u - KEYS[i].u;
+    const w0 = 2 * h1 + h0, w1 = h1 + 2 * h0;
+    m[i] = (w0 + w1) / (w0 / d[i - 1] + w1 / d[i]);             // weighted harmonic mean
+  }
+  return m;
+});
+
 const _p = new THREE.Vector3(), _t = new THREE.Vector3(), _v = new THREE.Vector3(), _ray = new THREE.Raycaster();
 
 function sample(u, out) {
   let i = 0;
   while (i < KEYS.length - 2 && u > KEYS[i + 1].u) i++;
-  const a = KEYS[i], b = KEYS[i + 1];
-  const f = smooth(a.u, b.u, u);
-  const l = (x, y) => x + (y - x) * f;
-  out.pos.set(l(a.pos[0], b.pos[0]), l(a.pos[1], b.pos[1]), l(a.pos[2], b.pos[2]));
-  out.tg.set(l(a.tg[0], b.tg[0]), l(a.tg[1], b.tg[1]), l(a.tg[2], b.tg[2]));
-  out.fov = l(a.fov, b.fov); out.sx = l(a.sx, b.sx); out.sy = l(a.sy, b.sy); out.dim = l(a.dim, b.dim);
+  const h = KEYS[i + 1].u - KEYS[i].u;
+  const t = clamp((u - KEYS[i].u) / h), t2 = t * t, t3 = t2 * t;
+  const h00 = 2 * t3 - 3 * t2 + 1, h10 = t3 - 2 * t2 + t, h01 = -2 * t3 + 3 * t2, h11 = t3 - t2;
+  const at = (c) => h00 * CH[i][c] + h10 * h * TAN[c][i] + h01 * CH[i + 1][c] + h11 * h * TAN[c][i + 1];
+  out.pos.set(at(0), at(1), at(2));
+  out.tg.set(at(3), at(4), at(5));
+  out.fov = at(6); out.sx = at(7); out.sy = at(8); out.dim = at(9);
 }
 
 function Studio({ small }) {

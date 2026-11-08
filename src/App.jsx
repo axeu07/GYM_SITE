@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { gsap, ScrollTrigger, initScroll, prefersReduced } from './lib/scroll';
-import { stage, want3D, introSeen, webglOK } from './lib/stage';
+import { stage, want3D, introSeen, webglOK, fireReveal } from './lib/stage';
 import { initReveals } from './lib/reveals';
 import Entrance from './components/Entrance';
 import Cursor from './components/Cursor';
@@ -25,12 +25,12 @@ const Stage3D = lazy(loadStage);
 if (wantGL) loadStage();
 
 export default function App() {
-  const [ready, setReady] = useState(false);
   const [play] = useState(() => !prefersReduced() && !introSeen() && webglOK());
   // The Pilates studio mounts once the opening is lit (so the two scenes never compile shaders at the same time).
   const [stageOn, setStageOn] = useState(() => !play);
   const root = useRef(null);
-  const onReveal = useCallback(() => setReady(true), []);
+  // The opening tells Hero (which subscribes to this signal itself) that its copy may start revealing.
+  const onReveal = useCallback(() => fireReveal(), []);
 
   useEffect(() => {
     if (stageOn) return undefined;
@@ -72,7 +72,7 @@ export default function App() {
       <Nav />
       <div ref={root}>
         <main>
-          <Hero ready={ready} gl={wantGL} />
+          <Hero gl={wantGL} />
           <Story gl={wantGL} />
           <div className="after">
             <Beyond />
